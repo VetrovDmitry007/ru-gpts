@@ -342,8 +342,7 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
                 model.zero_grad()
                 global_step += 1
 
-                print(f'lr = {scheduler.get_lr()[0]}, global_step = {global_step}')
-                print(f'tr_loss = {(tr_loss - logging_loss) / args.logging_steps}, global_step = {global_step}')
+                print(f'lr = {scheduler.get_lr()[0]}, loss = {loss.item()}, global_step = {global_step}')
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Log metrics
                     if (
