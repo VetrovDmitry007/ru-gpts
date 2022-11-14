@@ -343,7 +343,6 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
                 global_step += 1
 
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
-                    print(f'lr = {scheduler.get_lr()[0]}, loss = {loss.item()}, global_step = {global_step}')
                     # Log metrics
                     if (
                             args.local_rank == -1 and args.evaluate_during_training
@@ -355,10 +354,6 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar("loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
                     logging_loss = tr_loss
-
-
-
-
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
                     checkpoint_prefix = "checkpoint"
@@ -383,6 +378,8 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
             if 0 < args.max_steps < global_step:
                 epoch_iterator.close()
                 break
+        #Вычисление метрик в конце эпохи
+        print(f'lr = {scheduler.get_lr()[0]}, loss = {loss.item()}, global_step = {global_step}')
         if 0 < args.max_steps < global_step:
             train_iterator.close()
             break
