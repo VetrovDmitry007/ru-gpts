@@ -42,6 +42,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 from torch.utils.tensorboard import SummaryWriter
+import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -350,7 +351,6 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
                         results = evaluate(args, model, tokenizer)
                         for key, value in results.items():
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
-                            print(f'eval_{key}, value = {value}, global_step = {global_step}')
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar("loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
                     logging_loss = tr_loss
@@ -380,10 +380,12 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
                 break
         #Вычисление метрик в конце эпохи
         train_loss = tr_loss / global_step
-        print(f'lr = {scheduler.get_lr()[0]}, train_loss = {train_loss}, global_step = {global_step}')
-        val_results = evaluate(args, model, tokenizer)
-        for key, value in val_results.items():
-            print(f'eval_{key}, value = {value}')
+        lr= scheduler.get_lr()[0]
+        # val_results = evaluate(args, model, tokenizer)
+        # eval_loss = val_results['perplexity']
+        # print(f'lr = {scheduler.get_lr()[0]}, train_loss = {train_loss}, eval_loss = {eval_loss}')
+        print(f'lr = {lr}, train_loss = {train_loss}')
+        wandb.log({'lr': lr, 'train_loss': train_loss})
 
         if 0 < args.max_steps < global_step:
             train_iterator.close()
