@@ -730,6 +730,7 @@ def main():
 
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+        print(f" global_step = {global_step}, average loss = {tr_loss}")
 
     # Saving best-practices: if you use save_pretrained for the model and tokenizer,
     # you can reload them using from_pretrained()
@@ -773,7 +774,6 @@ def main():
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix)
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
-            print(f'Результат проверка: {result}')
             results.update(result)
 
     return results
