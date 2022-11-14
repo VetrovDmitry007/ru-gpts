@@ -379,7 +379,12 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
                 epoch_iterator.close()
                 break
         #Вычисление метрик в конце эпохи
-        print(f'lr = {scheduler.get_lr()[0]}, loss = {loss.item()}, global_step = {global_step}')
+        train_loss = tr_loss / global_step
+        print(f'lr = {scheduler.get_lr()[0]}, train_loss = {train_loss}, global_step = {global_step}')
+        val_results = evaluate(args, model, tokenizer)
+        for key, value in val_results.items():
+            print(f'eval_{key}, value = {value}')
+
         if 0 < args.max_steps < global_step:
             train_iterator.close()
             break
