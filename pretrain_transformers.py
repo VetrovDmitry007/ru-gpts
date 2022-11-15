@@ -42,6 +42,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 from torch.utils.tensorboard import SummaryWriter
+import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,9 @@ def mask_tokens(inputs: torch.Tensor, tokenizer: PreTrainedTokenizer, args) -> T
 
 
 def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[int, float]:
+    # Weights & Biases
+    run = wandb.init(project="my-project-1", reinit=True)
+
     """ Train the model """
     if args.local_rank in [-1, 0]:
         tb_writer = SummaryWriter()
@@ -377,13 +381,22 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
             if 0 < args.max_steps < global_step:
                 epoch_iterator.close()
                 break
+        #Вычисление метрик в конце эпохи
+        train_loss = tr_loss / global_step
+        lr= scheduler.get_lr()[0]
+        # val_results = evaluate(args, model, tokenizer)
+        # eval_loss = val_results['perplexity']
+        # print(f'lr = {scheduler.get_lr()[0]}, train_loss = {train_loss}, eval_loss = {eval_loss}')
+        print(f'lr = {lr}, train_loss = {train_loss}')
+        wandb.log({'lr': lr, 'train_loss': train_loss})
+
         if 0 < args.max_steps < global_step:
             train_iterator.close()
             break
-
     if args.local_rank in [-1, 0]:
         tb_writer.close()
 
+    run.finish()
     return global_step, tr_loss / global_step
 
 
@@ -645,12 +658,10 @@ def main():
     args.device = device
 
     # Setup logging
-    console_out = logging.StreamHandler()
-    logging.basicConfig(
-        handlers=console_out,
-        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN,
+    # console_out = logging.StreamHandler()
+    logging.basicConfig(format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+                        datefmt="%m/%d/%Y %H:%M:%S",
+                        level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN,
     )
     logger.warning(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
@@ -732,6 +743,7 @@ def main():
 
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+        print(f" global_step = {global_step}, average loss = {tr_loss}")
 
     # Saving best-practices: if you use save_pretrained for the model and tokenizer,
     # you can reload them using from_pretrained()
