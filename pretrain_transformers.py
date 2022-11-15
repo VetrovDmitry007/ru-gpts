@@ -27,7 +27,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, Dataset, RandomSampler, SequentialSampler
+from torch.utils.data import DataLoader, Dataset, RandomSampler, SequentialSampler, random_split
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 from transformers import (
@@ -42,7 +42,9 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 from torch.utils.tensorboard import SummaryWriter
+
 import wandb
+from jury import Jury
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,13 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 
 class TextDataset(Dataset):
+    """ Преобразует сплошной текст в список Tensor-ров,
+    каждый тензор размером = (block_size = 2048)
+
+    """
     def __init__(self, tokenizer: PreTrainedTokenizer, args, file_path: str, block_size=512):
         assert os.path.isfile(file_path)
-
+        print("Инициализация класса TextDataset")
         block_size = block_size - (tokenizer.max_len - tokenizer.max_len_single_sentence)
 
         directory, filename = os.path.split(file_path)
@@ -97,6 +103,7 @@ class LineByLineTextDataset(Dataset):
     """
     def __init__(self, tokenizer: PreTrainedTokenizer, args, file_path: str, block_size=512):
         assert os.path.isfile(file_path)
+        print("Инициализация класса LineByLineTextDataset")
         # Here, we do not cache the features, operating under the assumption
         # that we will soon use fast multithreaded tokenizers from the
         # `tokenizers` repo everywhere =)
@@ -202,7 +209,7 @@ def mask_tokens(inputs: torch.Tensor, tokenizer: PreTrainedTokenizer, args) -> T
     return inputs, labels
 
 
-def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[int, float]:
+def train(args, train_dataset, val_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[int, float]:
     # Weights & Biases
     run = wandb.init(project="my-project-1", reinit=True)
 
@@ -388,11 +395,18 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
         #Вычисление метрик в конце эпохи
         train_loss = tr_loss / global_step
         lr= scheduler.get_lr()[0]
-        # val_results = evaluate(args, model, tokenizer)
-        # eval_loss = val_results['perplexity']
-        # print(f'lr = {scheduler.get_lr()[0]}, train_loss = {train_loss}, eval_loss = {eval_loss}')
+        val_results = evaluate_2(val_dataset, model, tokenizer)
+        bleu_1_score = val_results['bleu_1']['score']
+        bleu_1_precisions = val_results['bleu_1']['precisions'][0]
+        meteor_score = val_results['meteor']['score']
+        # print(val_results)
         print(f'lr = {lr}, train_loss = {train_loss}')
-        wandb.log({'lr': lr, 'train_loss': train_loss})
+        # Передача метрик в "Weights & Biase"
+        wandb.log({'lr': lr,
+                   'train_loss': train_loss,
+                   'bleu_1_score': bleu_1_score,
+                   'bleu_1_precisions':bleu_1_precisions,
+                   'meteor_score':meteor_score})
 
         if 0 < args.max_steps < global_step:
             train_iterator.close()
@@ -403,6 +417,34 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
     run.finish()
     return global_step, tr_loss / global_step
 
+
+def evaluate_2(val_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Dict:
+    """ Получение метрик Jury на основе тестового и сгенерированного текста
+    val_dataset -- Список Tensor-ров
+    """
+    # print(f'len(val_dataset) = {len(val_dataset)}')
+    # print(f'val_dataset[1] = {val_dataset[1]}')
+    # print('-' * 25)
+    # print(tokenizer.decode(val_dataset[1]))
+    # print('-' * 25)
+    tesxt_etl = '<s>Тема: Революции – варварский способ прогресса. Ж.Жорес \n Сочинение: Революция – это коренной перелом в жизни общества, ведущий к смене старых порядков на новые. Революции никогда не вписывались в канву истории. Они разрывали и перекраивали ход истории. Основанные на насилии, все известные революции несли в себе собственную смерть, обрекали народы на гражданские войны, ломали судьбы людей. Парижская коммуна хранила свои завоевания 72 дня, Великая Французская революция – 5 лет, Октябрьская революция в России – 72 года. И каждый раз общество возвращалось на круги своя, к тому этапу, который был насильственно прерван революцией. Угасая, революции оставляют след. Чем гуманнее и справедливее были идеалы революции, тем ярче этот след.'
+    text_in = "<s>Тема: Революции – варварский способ прогресса. Ж.Жорес \n Сочинение: "
+    inpt = tokenizer.encode(text_in, return_tensors="pt").cuda()
+    out = model.generate(inpt.cuda(),
+                         max_length=500,
+                         repetition_penalty=5.0,
+                         # do_sample=True, # случайный выбор следующего слова
+                         top_k=5,
+                         top_p=0.95,
+                         temperature=0.8
+                         # early_stopping=True,
+                         # no_repeat_ngram_size =2
+                         )
+    text_out = tokenizer.decode(out[0])
+    # Создание метрик Jury
+    scorer = Jury()
+    scores = scorer(predictions=[text_out], references=[tesxt_etl])
+    return scores
 
 def evaluate(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, prefix="") -> Dict:
     # Loop to handle MNLI double evaluation (matched, mis-matched)
@@ -505,10 +547,12 @@ def main():
     )
 
     parser.add_argument(
-        "--mlm", action="store_true", help="Train with masked-language modeling loss instead of language modeling."
+        "--mlm", action="store_true",
+        help="Тренируйтесь с потерей моделирования языка в масках вместо языкового моделирования."
     )
     parser.add_argument(
-        "--mlm_probability", type=float, default=0.15, help="Ratio of tokens to mask for masked language modeling loss"
+        "--mlm_probability", type=float, default=0.15,
+        help="Отношение токенов к маске для потери моделирования замаскированного языка"
     )
 
     parser.add_argument(
@@ -559,6 +603,9 @@ def main():
     parser.add_argument("--weight_decay", default=0.01, type=float, help="Weight decay if we apply some.")
     parser.add_argument("--adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
+
+    parser.add_argument("--train_size_prc", default=0.90, type=float, help="Размер train набора в процентах.")
+
     parser.add_argument(
         "--num_train_epochs", default=1.0, type=float, help="Total number of training epochs to perform."
     )
@@ -736,12 +783,9 @@ def main():
     # Загрузка данных из файла в DataSet
     train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False)
     # Деление train_dataset на train_dataset и val_dataset
-    dataset_new = train_dataset.train_test_split(train_size=0.85, seed=42)
-    train_dataset = dataset_new.pop('train')
-    val_dataset = dataset_new.pop('test')
-    print(train_dataset.features)
-    print(val_dataset.features)
-
+    train_size = int(len(train_dataset)* args.train_size_prc)
+    val_size = len(train_dataset) - train_size
+    train_dataset, val_dataset = random_split(train_dataset, [int(train_size), int(val_size)])
 
     # Training
     if args.do_train:
@@ -752,7 +796,7 @@ def main():
         if args.local_rank == 0:
             torch.distributed.barrier()
 
-        global_step, tr_loss = train(args, train_dataset, model, tokenizer)
+        global_step, tr_loss = train(args, train_dataset, val_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
         print(f" global_step = {global_step}, average loss = {tr_loss}")
 
