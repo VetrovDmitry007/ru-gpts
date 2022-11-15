@@ -92,6 +92,9 @@ class TextDataset(Dataset):
 
 
 class LineByLineTextDataset(Dataset):
+    """  Отдельные строки текста в наборе данных обрабатываться как отдельные последовательности.
+
+    """
     def __init__(self, tokenizer: PreTrainedTokenizer, args, file_path: str, block_size=512):
         assert os.path.isfile(file_path)
         # Here, we do not cache the features, operating under the assumption
@@ -114,6 +117,7 @@ class LineByLineTextDataset(Dataset):
 def load_and_cache_examples(args, tokenizer, evaluate=False):
     file_path = args.eval_data_file if evaluate else args.train_data_file
     if args.line_by_line:
+        # Отдельные строки текста в наборе данных обрабатываются как отдельные последовательности.
         return LineByLineTextDataset(tokenizer, args, file_path=file_path, block_size=args.block_size)
     else:
         return TextDataset(tokenizer, args, file_path=file_path, block_size=args.block_size)
@@ -488,7 +492,7 @@ def main():
     parser.add_argument(
         "--line_by_line",
         action="store_true",
-        help="Whether distinct lines of text in the dataset are to be handled as distinct sequences.",
+        help="Должны ли отдельные строки текста в наборе данных обрабатываться как отдельные последовательности.",
     )
     parser.add_argument(
         "--should_continue", action="store_true", help="Whether to continue from latest checkpoint in output_dir"
@@ -729,15 +733,22 @@ def main():
 
     logger.info("Training/evaluation parameters %s", args)
 
+    # Загрузка данных из файла в DataSet
+    train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False)
+    # Деление train_dataset на train_dataset и val_dataset
+    dataset_new = train_dataset.train_test_split(train_size=0.85, seed=42)
+    train_dataset = dataset_new.pop('train')
+    val_dataset = dataset_new.pop('test')
+    print(train_dataset.features)
+    print(val_dataset.features)
+
+
     # Training
     if args.do_train:
         if args.local_rank not in [-1, 0]:
             torch.distributed.barrier()
             # Barrier to make sure only the first process in distributed
             # training process the dataset, and the others will use the cache
-
-        train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False)
-
         if args.local_rank == 0:
             torch.distributed.barrier()
 
