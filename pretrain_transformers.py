@@ -45,6 +45,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import wandb
 from jury import Jury
+from bert_score import score
 
 logger = logging.getLogger(__name__)
 
@@ -392,21 +393,27 @@ def train(args, train_dataset, val_dataset, model: PreTrainedModel, tokenizer: P
             if 0 < args.max_steps < global_step:
                 epoch_iterator.close()
                 break
-        #Вычисление метрик в конце эпохи
+        #Вычисление метрик train_loss и lr в конце каждой эпохи
         train_loss = tr_loss / global_step
         lr= scheduler.get_lr()[0]
-        val_results = evaluate_2(val_dataset, model, tokenizer)
-        bleu_1_score = val_results['bleu_1']['score']
-        bleu_1_precisions = val_results['bleu_1']['precisions'][0]
-        meteor_score = val_results['meteor']['score']
-        # print(val_results)
         print(f'lr = {lr}, train_loss = {train_loss}')
-        # Передача метрик в "Weights & Biase"
-        wandb.log({'lr': lr,
-                   'train_loss': train_loss,
-                   'bleu_1_score': bleu_1_score,
+        dc_metric = {'lr': lr, 'train_loss': train_loss}
+        # Получение метрик Yury и BERTScore
+        val_results = evaluate_2(args, val_dataset, model, tokenizer)
+        if args.mertic_yury:
+            bleu_1_score = val_results['bleu_1']['score']
+            bleu_1_precisions = val_results['bleu_1']['precisions'][0]
+            meteor_score = val_results['meteor']['score']
+            dc_metric.update({'bleu_1_score': bleu_1_score,
                    'bleu_1_precisions':bleu_1_precisions,
                    'meteor_score':meteor_score})
+        if args.mertic_bert:
+            precision_bert = val_results['precision_bert']
+            recall_bert = val_results['recall_bert']
+            F1_bert = val_results['F1_bert']
+            dc_metric.update({'precision_bert':precision_bert, 'recall_bert':recall_bert, 'F1_bert':F1_bert})
+        # Передача метрик в "Weights & Biase"
+        wandb.log(dc_metric)
 
         if 0 < args.max_steps < global_step:
             train_iterator.close()
@@ -418,15 +425,10 @@ def train(args, train_dataset, val_dataset, model: PreTrainedModel, tokenizer: P
     return global_step, tr_loss / global_step
 
 
-def evaluate_2(val_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Dict:
+def evaluate_2(args, val_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Dict:
     """ Получение метрик Jury на основе тестового и сгенерированного текста
     val_dataset -- Список Tensor-ров
     """
-    # print(f'len(val_dataset) = {len(val_dataset)}')
-    # print(f'val_dataset[1] = {val_dataset[1]}')
-    # print('-' * 25)
-    # print(tokenizer.decode(val_dataset[1]))
-    # print('-' * 25)
     tesxt_etl = '<s>Тема: Революции – варварский способ прогресса. Ж.Жорес \n Сочинение: Революция – это коренной перелом в жизни общества, ведущий к смене старых порядков на новые. Революции никогда не вписывались в канву истории. Они разрывали и перекраивали ход истории. Основанные на насилии, все известные революции несли в себе собственную смерть, обрекали народы на гражданские войны, ломали судьбы людей. Парижская коммуна хранила свои завоевания 72 дня, Великая Французская революция – 5 лет, Октябрьская революция в России – 72 года. И каждый раз общество возвращалось на круги своя, к тому этапу, который был насильственно прерван революцией. Угасая, революции оставляют след. Чем гуманнее и справедливее были идеалы революции, тем ярче этот след.'
     text_in = "<s>Тема: Революции – варварский способ прогресса. Ж.Жорес \n Сочинение: "
     inpt = tokenizer.encode(text_in, return_tensors="pt").cuda()
@@ -441,10 +443,17 @@ def evaluate_2(val_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokeniz
                          # no_repeat_ngram_size =2
                          )
     text_out = tokenizer.decode(out[0])
-    # Создание метрик Jury
-    scorer = Jury()
-    scores = scorer(predictions=[text_out], references=[tesxt_etl])
-    return scores
+    result = dict()
+    if args.mertic_yury:
+        # Создание метрик Jury
+        scorer = Jury()
+        scores = scorer(predictions=[text_out], references=[tesxt_etl])
+        result.update(scores)
+    if args.mertic_bert:
+        # Создание метрик BERTscore
+        P, R, F1 = score([text_out], [tesxt_etl], lang="ru", verbose=True)
+        result.update({'precision_bert':P.item(), 'recall_bert':R.item(), 'F1_bert':F1.item()})
+    return result
 
 def evaluate(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, prefix="") -> Dict:
     # Loop to handle MNLI double evaluation (matched, mis-matched)
@@ -604,7 +613,14 @@ def main():
     parser.add_argument("--adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
 
+    # Добавленные параметры
     parser.add_argument("--train_size_prc", default=0.90, type=float, help="Размер train набора в процентах.")
+    parser.add_argument(
+        "--mertic_yury", action="store_true", help="Jury - набор инструментов для оценки экспериментов НЛП."
+    )
+    parser.add_argument(
+        "--mertic_bert", action="store_true", help="BERTscore - метрика автоматической оценки для генерации текста."
+    )
 
     parser.add_argument(
         "--num_train_epochs", default=1.0, type=float, help="Total number of training epochs to perform."
