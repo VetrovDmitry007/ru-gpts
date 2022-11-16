@@ -294,6 +294,7 @@ def train(args, train_dataset, val_dataset, model: PreTrainedModel, tokenizer: P
     logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
     logger.info("  Total optimization steps = %d", t_total)
 
+    torch.cuda.empty_cache()
     global_step = 0
     epochs_trained = 0
     steps_trained_in_current_epoch = 0
