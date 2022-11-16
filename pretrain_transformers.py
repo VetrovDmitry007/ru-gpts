@@ -490,6 +490,7 @@ def evaluate(args, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, prefi
     logger.info("  Batch size = %d", args.eval_batch_size)
     eval_loss = 0.0
     nb_eval_steps = 0
+    torch.cuda.empty_cache()
     model.eval()
 
     for batch in tqdm(eval_dataloader, desc="Evaluating"):
