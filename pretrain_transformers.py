@@ -396,10 +396,12 @@ def train(args, train_dataset, val_dataset, model: PreTrainedModel, tokenizer: P
         #Вычисление метрик train_loss и lr в конце каждой эпохи
         train_loss = tr_loss / global_step
         lr= scheduler.get_lr()[0]
-        print(f'lr = {lr}, train_loss = {train_loss}')
-        dc_metric = {'lr': lr, 'train_loss': train_loss}
+        eval_result = evaluate(args, model, tokenizer)
+        dc_metric = {'lr': lr, 'train_loss': train_loss, 'eval_loss': eval_result['perplexity']}
+        print(dc_metric)
         # Получение метрик Yury и BERTScore
-        val_results = evaluate_2(args, val_dataset, model, tokenizer)
+        if args.mertic_yury or args.mertic_bert:
+            val_results = evaluate_2(args, val_dataset, model, tokenizer)
         if args.mertic_yury:
             bleu_1_score = val_results['bleu_1']['score']
             bleu_1_precisions = val_results['bleu_1']['precisions'][0]
