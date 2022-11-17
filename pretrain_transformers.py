@@ -212,7 +212,7 @@ def mask_tokens(inputs: torch.Tensor, tokenizer: PreTrainedTokenizer, args) -> T
 
 def train(args, train_dataset, val_dataset, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[int, float]:
     # Weights & Biases
-    run = wandb.init(project="my-project-1", reinit=True)
+    run = wandb.init(project=args.proj_wb_name, reinit=True)
 
     """ Train the model """
     if args.local_rank in [-1, 0]:
@@ -618,6 +618,7 @@ def main():
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
 
     # Добавленные параметры
+    #
     parser.add_argument("--train_size_prc", default=0.90, type=float, help="Размер train набора в процентах.")
     parser.add_argument(
         "--mertic_yury", action="store_true", help="Jury - набор инструментов для оценки экспериментов НЛП."
@@ -625,6 +626,13 @@ def main():
     parser.add_argument(
         "--mertic_bert", action="store_true", help="BERTscore - метрика автоматической оценки для генерации текста."
     )
+    parser.add_argument(
+        "--proj_wb_name",
+        default=None,
+        type=str,
+        help="Имя проекта отслеживания метрик Weights & Biases.",
+    )
+    #
 
     parser.add_argument(
         "--num_train_epochs", default=1.0, type=float, help="Total number of training epochs to perform."
